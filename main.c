@@ -248,6 +248,11 @@ int32_t LowPress=0;
 int16_t SqueezeID=0;
 int16_t PinchID=0;
 int16_t ExType=0;
+int32_t TimeCount=0;
+
+// Test Type 1: App Test, 2: Azure Test
+int8_t TestType=2;
+int32_t AzureAvg=0;
 
 /* Table with All the known Meta Data */
 MDM_knownGMD_t known_MetaData[]={
@@ -328,8 +333,8 @@ static void ButtonCallback(void);
 static void SendMotionData(void);
 static void SendAudioLevelData(void);
 
-void PressureSensing(int32_t ReadPress, int32_t *PrevPress, int32_t *LowPress, int32_t *HighPress, int16_t *SqueezeID, int16_t *PinchID, int16_t *ExType);
-
+void PressureSensing(int32_t ReadPress, int32_t *PrevPress, int32_t *LowPress, int32_t *HighPress, int16_t *SqueezeID, int16_t *PinchID, int16_t *ExType, int32_t *TimeCount);
+void AzureSensing(int32_t ReadPress, int32_t *AzureAvg, int32_t *TimeCount);
 
 //void SW_BV_send_Callback(void);
 
@@ -1471,7 +1476,12 @@ static void SendEnvironmentalData(void)
         } else {
           //ALLMEMS1_PRINTF("Press=%ld ",PressToSend);
         }
-        PressureSensing(PressToSend, &PrevPress, &LowPress, &HighPress, &SqueezeID, &PinchID, &ExType);
+        if (TestType == 1) {
+        	PressureSensing(PressToSend, &PrevPress, &LowPress, &HighPress, &SqueezeID, &PinchID, &ExType, &TimeCount);
+        }
+        else if (TestType == 2) {
+        	AzureSensing (PressToSend, &AzureAvg, &TimeCount);
+        }
 
 #endif /* ALLMEMS1_DEBUG_NOTIFY_TRAMISSION */
       }
@@ -1551,75 +1561,173 @@ static void SendEnvironmentalData(void)
 #endif /* ALLMEMS1_DEBUG_NOTIFY_TRAMISSION */
 }
 
-void PressureSensing(int32_t PressRead, int32_t *PrevPress, int32_t *LowPress, int32_t *HighPress, int16_t *SqueezeID, int16_t *PinchID, int16_t *ExType)
+void PressureSensing(int32_t PressRead, int32_t *PrevPress, int32_t *LowPress, int32_t *HighPress, int16_t *SqueezeID, int16_t *PinchID, int16_t *ExType, int32_t *TimeCount)
 {
 	int32_t zscore=0;
 
+	// Accumulate Timer if started counting
+	if (*TimeCount != 0) {
+		*TimeCount += 500;
+	}
+
+	// Exercise Types:
+	// 0 = Short Squeeze
+	// 1 = Short Pinch
+	// 2 = Long Squeeze
+	// 3 = Long Pinch
+
 	// Reset exercises when finished
-	if ((*SqueezeID >= 10) && (*PinchID >= 10)) {
+	if ((*SqueezeID >= 10) || (*PinchID >= 10)) {
 		*SqueezeID = 0;
 		*PinchID = 0;
+		if (*ExType == 3) {
+			*ExType = 0;
+		}
+		else {
+			*ExType += 1;
+		}
 	}
 
 	// Check if squeeze exercises are done, start pinch
-	if (*SqueezeID < 10) {
-		*ExType = 0;
-		ALLMEMS1_PRINTF("Squeeze test #%d\r\n",*SqueezeID + 1);
+	if (*ExType == 0) {
+		ALLMEMS1_PRINTF("Short Squeeze test #%d\r\n",*SqueezeID + 1);
+	}
+	else if (*ExType == 1) {
+		ALLMEMS1_PRINTF("Short Pinch test #%d\r\n",*PinchID + 1);
+	}
+	else if (*ExType == 2) {
+		ALLMEMS1_PRINTF("Long Squeeze test #%d\r\n",*SqueezeID + 1);
 	}
 	else {
-		*ExType = 1;
-		ALLMEMS1_PRINTF("Pinch test #%d\r\n",*PinchID + 1);
+		ALLMEMS1_PRINTF("Long Pinch test #%d\r\n",*PinchID + 1);
 	}
 
 	// Initialize Low Pressure reading if none exists
 	if(*LowPress == 0) {
-		*LowPress=PressRead;
+		*LowPress = PressRead;
 	}
 
-	// Check if pressure is rising, update high pressure reading
-	if(PressRead > *PrevPress + 50) {
-	     *HighPress=PressRead;
+	// Check if pressure is rising, update high pressure reading, start Timer
+	if(PressRead > *PrevPress + 500) {
+	     *HighPress = PressRead;
+	     *TimeCount = 500;
 	}
 
 	// If pressure is falling, update low pressure reading
-	if(PressRead < *PrevPress - 50) {
+	// Monitor falling pressure during grip, make sure difference is not outside of Q3
+	// Q3 of falling pressure during long squeeze is 430
+	// Q3 of falling pressure during long pinch is 462
+	if((((*ExType == 0) || (*ExType == 2)) && (PressRead < *PrevPress - 430)) ||
+			(((*ExType == 1) || (*ExType == 3)) && (PressRead < *PrevPress - 462))) {
 
 		 // If high pressure has been previously recorded, compute difference and z-score
 	     if (*HighPress != 0) {
 	        ALLMEMS1_PRINTF("Press Detected! Change in Pressure=%ld ",*HighPress - *LowPress);
+
+	        // Compute z-score for short squeeze
+	        // mean = 5057
+	        // standard deviation = 192
 	        if (*ExType == 0) {
 	        	zscore = (*HighPress - *LowPress - 5057)/192;
-	        	ALLMEMS1_PRINTF("Looking for Squeeze... ");
-	        	*SqueezeID = *SqueezeID + 1;
+	        	ALLMEMS1_PRINTF("Looking for Short Squeeze... ");
+	        	*SqueezeID += 1;
 	        }
-	        else {
+
+	        // Compute z-score for short pinch
+	        // mean = 3149
+	        // standard deviation = 97
+	        else if (*ExType == 1) {
 	        	zscore = (*HighPress - *LowPress - 3149)/97;
-	        	ALLMEMS1_PRINTF("Looking for Pinch... ");
-	        	*PinchID = *PinchID + 1;
+	        	ALLMEMS1_PRINTF("Looking for Short Pinch... ");
+	        	*PinchID += 1;
 	        }
+
+	        // Compute z-score for long squeeze
+	        // mean = 5214
+	        // standard deviation = 315
+	        else if (*ExType == 2) {
+	        	zscore = (*HighPress - *LowPress - 5214)/315;
+	        	ALLMEMS1_PRINTF("Looking for Long Squeeze... ");
+	        	*SqueezeID += 1;
+	        }
+
+	        // Compute z-score for long pinch
+	        // mean = 3320
+	        // standard deviation = 111
+	        else if (*ExType == 3) {
+	        	zscore = (*HighPress - *LowPress - 3320)/111;
+	        	ALLMEMS1_PRINTF("Looking for Long Pinch... ");
+	        	*PinchID += 1;
+	        }
+
+	        // Print z-score
 	        ALLMEMS1_PRINTF("Z-Score=%ld\r\n",zscore);
 	        *HighPress=0;
 
+	        // If z-score is  within +- 3 standard deviations, pressure is perfect
 	        if ((zscore >= -3) && (zscore <= 3)) {
-	        	ALLMEMS1_PRINTF("Perfect!\r\n");
+	        	ALLMEMS1_PRINTF("Perfect Pressure!\r\n");
 	        }
+
+	        // If z-score is within -10 to -3 standard deviations, pressure is low
 	        else if ((zscore < -3) && (zscore >= -10)) {
 	        	ALLMEMS1_PRINTF("Good, Pressure Low\r\n");
 	        }
+
+	        // If z-score is within +10 to +3 standard deviations, pressure is high
 	        else if ((zscore > 3) && (zscore <= 10)) {
 	        	ALLMEMS1_PRINTF("Good, Pressure High\r\n");
 	        }
+
+	        // If z-score is less than -10 standard deviations, pressure is too low
 	        else if (zscore < -10) {
 	        	ALLMEMS1_PRINTF("Pressure Too Low\r\n");
 	        }
+
+	        // If z-score is greater than +10 standard deviations, pressure is too high
 	        else if (zscore > 10) {
 	        	ALLMEMS1_PRINTF("Pressure Too High\r\n");
 	        }
+
+	        // If pressure drops rapidly, grip is released. If timer is less than 5 seconds, show error.
+	        if ((*ExType > 1) && (*TimeCount < 5000) && (PressRead < *PrevPress - 1000)) {
+	        	ALLMEMS1_PRINTF("Grip Too Short! Please Hold For 5 Seconds.\r\n");
+	        }
+
+	        // If pressure is not held during long squeeze, show error
+	        if ((*ExType == 2) && (*TimeCount < 5000) && (PressRead > *PrevPress - 1000)) {
+	        	ALLMEMS1_PRINTF("Squeeze Pressure Not Maintained.\r\n");
+	        }
+
+	        // If pressure is not held during long pinch, show error
+	        if ((*ExType == 3) && (*TimeCount < 5000) && (PressRead > *PrevPress - 1000)) {
+	        	ALLMEMS1_PRINTF("Pinch Pressure Not Maintained.\r\n");
+	        }
 	     }
-	     *LowPress=PressRead;
+
+	     // Reset low pressure reading and timer
+	     *LowPress = PressRead;
+	     *TimeCount = 0;
 	}
 
+	// Update previous pressure reading
 	*PrevPress = PressRead;
+}
+
+void AzureSensing (int32_t PressRead, int32_t *AzureAvg, int32_t *TimeCount)
+{
+	// Send average pressure every 10 seconds and reset
+	if (*TimeCount > 10000) {
+		ALLMEMS1_PRINTF("%d\r\n", *AzureAvg);
+		*AzureAvg = 0;
+		*TimeCount = 0;
+	}
+	// Increment timer and update average
+	else {
+		*TimeCount += 500;
+		*AzureAvg = (*AzureAvg + PressRead)/2;
+	}
+
 }
 
 #ifdef STM32_SENSORTILE
