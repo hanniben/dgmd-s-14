@@ -253,6 +253,7 @@ int32_t TimeCount=0;
 // Test Type 1: App Test, 2: Azure Test
 int8_t TestType=2;
 int32_t AzureAvg=0;
+int32_t AzureStart=0;
 
 /* Table with All the known Meta Data */
 MDM_knownGMD_t known_MetaData[]={
@@ -334,7 +335,7 @@ static void SendMotionData(void);
 static void SendAudioLevelData(void);
 
 void PressureSensing(int32_t ReadPress, int32_t *PrevPress, int32_t *LowPress, int32_t *HighPress, int16_t *SqueezeID, int16_t *PinchID, int16_t *ExType, int32_t *TimeCount);
-void AzureSensing(int32_t ReadPress, int32_t *AzureAvg, int32_t *TimeCount);
+void AzureSensing(int32_t ReadPress, int32_t *AzureAvg, int32_t *TimeCount, int32_t *AzureStart);
 
 //void SW_BV_send_Callback(void);
 
@@ -1480,7 +1481,7 @@ static void SendEnvironmentalData(void)
         	PressureSensing(PressToSend, &PrevPress, &LowPress, &HighPress, &SqueezeID, &PinchID, &ExType, &TimeCount);
         }
         else if (TestType == 2) {
-        	AzureSensing (PressToSend, &AzureAvg, &TimeCount);
+        	AzureSensing (PressToSend, &AzureAvg, &TimeCount, &AzureStart);
         }
 
 #endif /* ALLMEMS1_DEBUG_NOTIFY_TRAMISSION */
@@ -1714,19 +1715,31 @@ void PressureSensing(int32_t PressRead, int32_t *PrevPress, int32_t *LowPress, i
 	*PrevPress = PressRead;
 }
 
-void AzureSensing (int32_t PressRead, int32_t *AzureAvg, int32_t *TimeCount)
+void AzureSensing (int32_t PressRead, int32_t *AzureAvg, int32_t *TimeCount, int32_t *AzureStart)
 {
 	// Send average pressure every 10 seconds and reset
-	if (*TimeCount > 10000) {
-		ALLMEMS1_PRINTF("%d\r\n", *AzureAvg);
-		*AzureAvg = 0;
-		*TimeCount = 0;
+	if (*TimeCount == 10000) {
+		ALLMEMS1_PRINTF("%d\r\n", *AzureAvg - *AzureStart);
 	}
-	// Increment timer and update average
-	else {
-		*TimeCount += 500;
+
+	// Update average
+	if (*TimeCount < 10000) {
 		*AzureAvg = (*AzureAvg + PressRead)/2;
 	}
+
+	// Restart at 15 seconds, 5 second delay for usability
+	if (*TimeCount > 14000) {
+		*TimeCount = 0;
+		*AzureAvg = 0;
+	}
+
+	// Obtain atmospheric pressure
+	if (*TimeCount == 0) {
+		*AzureStart = PressRead;
+		ALLMEMS1_PRINTF("Start\r\n");
+	}
+
+	*TimeCount += 500;
 
 }
 
