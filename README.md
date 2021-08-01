@@ -1,6 +1,6 @@
-# DGMD S-14
+# SmartGrip
 
-DGMD S-14 Wearable Devices and Computer Vision Final Project
+Final Project DGMD S-14 Wearable Devices and Computer Vision
 
 - [Final Report](https://github.com/hanniben/dgmd-s-14/blob/main/Final%20Report.pdf)
 - [Slides](https://docs.google.com/presentation/d/1kxbxDdA12vagKHSodtZn1uXhzckVLyjf2ZxFkIA_kwY/edit?usp=sharing)
