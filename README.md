@@ -1,5 +1,5 @@
 # DGMD S-14
----
+
 DGMD S-14 Wearable Devices and Computer Vision Final Project
 
 [Final Report](https://github.com/hanniben/dgmd-s-14/blob/main/Final%20Report.pdf)
